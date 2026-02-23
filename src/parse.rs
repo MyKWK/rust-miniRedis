@@ -3,37 +3,33 @@ use crate::Frame;
 use bytes::Bytes;
 use std::{fmt, str, vec};
 
-/// Utility for parsing a command
+/// 用于解析命令的工具
 ///
-/// Commands are represented as array frames. Each entry in the frame is a
-/// "token". A `Parse` is initialized with the array frame and provides a
-/// cursor-like API. Each command struct includes a `parse_frame` method that
-/// uses a `Parse` to extract its fields.
+/// 命令表示为数组帧。帧中的每个条目是一个"token"。`Parse` 使用数组帧初始化，
+/// 并提供类似光标的 API。每个命令结构体都包含一个 `parse_frame` 方法，使用
+/// `Parse` 来提取其字段
 #[derive(Debug)]
 pub(crate) struct Parse {
     /// Array frame iterator.
     parts: vec::IntoIter<Frame>,
 }
 
-/// Error encountered while parsing a frame.
+/// 解析帧时遇到的错误
 ///
-/// Only `EndOfStream` errors are handled at runtime. All other errors result in
-/// the connection being terminated.
+/// 只有 `EndOfStream` 错误在运行时处理。所有其他错误都会导致连接被终止
 #[derive(Debug)]
 pub(crate) enum ParseError {
-    /// Attempting to extract a value failed due to the frame being fully
-    /// consumed.
+    /// 由于帧已被完全消耗，尝试提取值失败
     EndOfStream,
 
-    /// All other errors
+    /// 所有其他错误
     Other(crate::Error),
 }
 
 impl Parse {
-    /// Create a new `Parse` to parse the contents of `frame`.
+    /// 创建一个新的 `Parse` 来解析 `frame` 的内容
     ///
-    /// Returns `Err` if `frame` is not an array frame.
-    pub(crate) fn new(frame: Frame) -> Result<Parse, ParseError> {
+    /// 如果 `frame` 不是数组帧，则返回 `Err`
         let array = match frame {
             Frame::Array(array) => array,
             frame => return Err(format!("protocol error; expected array, got {:?}", frame).into()),
@@ -44,16 +40,14 @@ impl Parse {
         })
     }
 
-    /// Return the next entry. Array frames are arrays of frames, so the next
-    /// entry is a frame.
+    /// 返回下一个条目。数组帧是帧的数组，因此下一个条目是一个帧
     fn next(&mut self) -> Result<Frame, ParseError> {
         self.parts.next().ok_or(ParseError::EndOfStream)
     }
 
-    /// Return the next entry as a string.
+    /// 以字符串形式返回下一个条目
     ///
-    /// If the next entry cannot be represented as a String, then an error is returned.
-    pub(crate) fn next_string(&mut self) -> Result<String, ParseError> {
+    /// 如果下一个条目不能表示为字符串，则返回错误
         match self.next()? {
             // Both `Simple` and `Bulk` representation may be strings. Strings
             // are parsed to UTF-8.
@@ -72,11 +66,9 @@ impl Parse {
         }
     }
 
-    /// Return the next entry as raw bytes.
+    /// 以原始字节形式返回下一个条目
     ///
-    /// If the next entry cannot be represented as raw bytes, an error is
-    /// returned.
-    pub(crate) fn next_bytes(&mut self) -> Result<Bytes, ParseError> {
+    /// 如果下一个条目不能表示为原始字节，则返回错误
         match self.next()? {
             // Both `Simple` and `Bulk` representation may be raw bytes.
             //
@@ -92,14 +84,12 @@ impl Parse {
         }
     }
 
-    /// Return the next entry as an integer.
+    /// 以整数形式返回下一个条目
     ///
-    /// This includes `Simple`, `Bulk`, and `Integer` frame types. `Simple` and
-    /// `Bulk` frame types are parsed.
+    /// 这包括 `Simple`、`Bulk` 和 `Integer` 帧类型。`Simple` 和 `Bulk`
+    /// 帧类型会被解析
     ///
-    /// If the next entry cannot be represented as an integer, then an error is
-    /// returned.
-    pub(crate) fn next_int(&mut self) -> Result<u64, ParseError> {
+    /// 如果下一个条目不能表示为整数，则返回错误
         use atoi::atoi;
 
         const MSG: &str = "protocol error; invalid number";
@@ -115,7 +105,7 @@ impl Parse {
         }
     }
 
-    /// Ensure there are no more entries in the array
+    /// 确保数组中没有更多条目
     pub(crate) fn finish(&mut self) -> Result<(), ParseError> {
         if self.parts.next().is_none() {
             Ok(())

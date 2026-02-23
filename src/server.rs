@@ -1,7 +1,6 @@
-//! Minimal Redis server implementation
+//! 最小 Redis 服务器实现
 //!
-//! Provides an async `run` function that listens for inbound connections,
-//! spawning a task per connection.
+//! 提供一个异步的 `run` 函数，用于侦听传入连接，并为每个连接生成一个任务
 
 use crate::{Command, Connection, Db, DbDropGuard, Shutdown};
 
@@ -12,88 +11,72 @@ use tokio::sync::{broadcast, mpsc, Semaphore};
 use tokio::time::{self, Duration};
 use tracing::{debug, error, info, instrument};
 
-/// Server listener state. Created in the `run` call. It includes a `run` method
-/// which performs the TCP listening and initialization of per-connection state.
+/// 服务器侦听器状态。在 `run` 调用中创建。它包括一个 `run` 方法，
+/// 该方法执行 TCP 侦听并初始化每连接状态
 #[derive(Debug)]
 struct Listener {
-    /// Shared database handle.
+    /// 共享数据库句柄
     ///
-    /// Contains the key / value store as well as the broadcast channels for
-    /// pub/sub.
+    /// 包含键/值存储以及用于发布/订阅的广播通道
     ///
-    /// This holds a wrapper around an `Arc`. The internal `Db` can be
-    /// retrieved and passed into the per connection state (`Handler`).
+    /// 这持有围绕 `Arc` 的包装器。可以检索内部 `Db` 并将其传递到每连接状态（`Handler`）
     db_holder: DbDropGuard,
 
-    /// TCP listener supplied by the `run` caller.
+    /// 由 `run` 调用者提供的 TCP 侦听器
     listener: TcpListener,
 
-    /// Limit the max number of connections.
+    /// 限制最大连接数
     ///
-    /// A `Semaphore` is used to limit the max number of connections. Before
-    /// attempting to accept a new connection, a permit is acquired from the
-    /// semaphore. If none are available, the listener waits for one.
+    /// 使用 `Semaphore` 来限制最大连接数。在尝试接受新连接之前，会从信号量
+    /// 获取一个许可。如果没有可用许可，侦听器会等待一个
     ///
-    /// When handlers complete processing a connection, the permit is returned
-    /// to the semaphore.
+    /// 当处理程序完成处理连接时，许可会返回给信号量
     limit_connections: Arc<Semaphore>,
 
-    /// Broadcasts a shutdown signal to all active connections.
+    /// 向所有活动连接广播关闭信号
     ///
-    /// The initial `shutdown` trigger is provided by the `run` caller. The
-    /// server is responsible for gracefully shutting down active connections.
-    /// When a connection task is spawned, it is passed a broadcast receiver
-    /// handle. When a graceful shutdown is initiated, a `()` value is sent via
-    /// the broadcast::Sender. Each active connection receives it, reaches a
-    /// safe terminal state, and completes the task.
+    /// 初始的 `shutdown` 触发器由 `run` 调用者提供。服务器负责优雅地关闭活动连接。
+    /// 当生成连接任务时，会传递一个广播接收器句柄。当启动优雅关闭时，
+    /// 会通过 broadcast::Sender 发送一个 `()` 值。每个活动连接都会收到它，
+    /// 达到安全的终止状态，并完成任务
     notify_shutdown: broadcast::Sender<()>,
 
-    /// Used as part of the graceful shutdown process to wait for client
-    /// connections to complete processing.
+    /// 用作优雅关闭过程的一部分，以等待客户端连接完成处理
     ///
-    /// Tokio channels are closed once all `Sender` handles go out of scope.
-    /// When a channel is closed, the receiver receives `None`. This is
-    /// leveraged to detect all connection handlers completing. When a
-    /// connection handler is initialized, it is assigned a clone of
-    /// `shutdown_complete_tx`. When the listener shuts down, it drops the
-    /// sender held by this `shutdown_complete_tx` field. Once all handler tasks
-    /// complete, all clones of the `Sender` are also dropped. This results in
-    /// `shutdown_complete_rx.recv()` completing with `None`. At this point, it
-    /// is safe to exit the server process.
+    /// 当所有 `Sender` 句柄超出范围时，Tokio 通道会关闭。当通道关闭时，
+    /// 接收器会收到 `None`。这用于检测所有连接处理程序已完成。
+    /// 当初始化连接处理程序时，会分配 `shutdown_complete_tx` 的一个克隆。
+    /// 当侦听器关闭时，它会删除此 `shutdown_complete_tx` 字段持有的发送器。
+    /// 一旦所有处理程序任务完成，`Sender` 的所有克隆也会被删除。这导致
+    /// `shutdown_complete_rx.recv()` 以 `None` 完成。此时，退出服务器进程是安全的
     shutdown_complete_tx: mpsc::Sender<()>,
 }
 
-/// Per-connection handler. Reads requests from `connection` and applies the
-/// commands to `db`.
+/// 每连接处理程序。从 `connection` 读取请求并将命令应用到 `db`
 #[derive(Debug)]
 struct Handler {
-    /// Shared database handle.
+    /// 共享数据库句柄
     ///
-    /// When a command is received from `connection`, it is applied with `db`.
-    /// The implementation of the command is in the `cmd` module. Each command
-    /// will need to interact with `db` in order to complete the work.
+    /// 当从 `connection` 收到命令时，它被应用到 `db`。命令实现在 `cmd` 模块中。
+    /// 每个命令都需要与 `db` 交互才能完成工作
     db: Db,
 
-    /// The TCP connection decorated with the redis protocol encoder / decoder
-    /// implemented using a buffered `TcpStream`.
+    /// TCP 连接，使用使用缓冲 `TcpStream` 实现的 redis 协议编码器/解码器装饰
     ///
-    /// When `Listener` receives an inbound connection, the `TcpStream` is
-    /// passed to `Connection::new`, which initializes the associated buffers.
-    /// `Connection` allows the handler to operate at the "frame" level and keep
-    /// the byte level protocol parsing details encapsulated in `Connection`.
+    /// 当 `Listener` 收到传入连接时，`TcpStream` 被传递给 `Connection::new`，
+    /// 它初始化关联的缓冲区。`Connection` 允许处理程序在"帧"级别操作，
+    /// 并将字节级协议解析细节封装在 `Connection` 中
     connection: Connection,
 
-    /// Listen for shutdown notifications.
+    /// 侦听关闭通知
     ///
-    /// A wrapper around the `broadcast::Receiver` paired with the sender in
-    /// `Listener`. The connection handler processes requests from the
-    /// connection until the peer disconnects **or** a shutdown notification is
-    /// received from `shutdown`. In the latter case, any in-flight work being
-    /// processed for the peer is continued until it reaches a safe state, at
-    /// which point the connection is terminated.
+    /// `broadcast::Receiver` 的包装器，与 `Listener` 中的发送器配对。
+    /// 连接处理程序处理来自连接的请求，直到对等方断开连接**或**
+    /// 从 `shutdown` 收到关闭通知。在后一种情况下，继续为对等方处理的任何
+    /// 进行中的工作，直到它达到安全状态，此时终止连接
     shutdown: Shutdown,
 
-    /// Not used directly. Instead, when `Handler` is dropped...?
+    /// 不直接使用。相反，当 `Handler` 被删除时...？
     _shutdown_complete: mpsc::Sender<()>,
 }
 

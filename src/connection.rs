@@ -5,32 +5,28 @@ use std::io::{self, Cursor};
 use tokio::io::{AsyncReadExt, AsyncWriteExt, BufWriter};
 use tokio::net::TcpStream;
 
-/// Send and receive `Frame` values from a remote peer.
+/// 从远程对等方发送和接收 `Frame` 值
 ///
-/// When implementing networking protocols, a message on that protocol is
-/// often composed of several smaller messages known as frames. The purpose of
-/// `Connection` is to read and write frames on the underlying `TcpStream`.
+/// 在实现网络协议时，该协议上的消息通常由几个较小的消息组成，称为帧。
+/// `Connection` 的目的是在底层 `TcpStream` 上读取和写入帧
 ///
-/// To read frames, the `Connection` uses an internal buffer, which is filled
-/// up until there are enough bytes to create a full frame. Once this happens,
-/// the `Connection` creates the frame and returns it to the caller.
+/// 要读取帧，`Connection` 使用内部缓冲区，该缓冲区会被填充，直到有足够的
+/// 字节来创建完整的帧。一旦这种情况发生，`Connection` 就会创建帧并将其返回
+/// 给调用者
 ///
-/// When sending frames, the frame is first encoded into the write buffer.
-/// The contents of the write buffer are then written to the socket.
+/// 发送帧时，帧首先被编码到写缓冲区中。然后写缓冲区的内容会被写入套接字
 #[derive(Debug)]
 pub struct Connection {
-    // The `TcpStream`. It is decorated with a `BufWriter`, which provides write
-    // level buffering. The `BufWriter` implementation provided by Tokio is
-    // sufficient for our needs.
+    // `TcpStream`。它使用 `BufWriter` 装饰，提供写级别的缓冲
+    // Tokio 提供的 `BufWriter` 实现对于我们的需求来说已经足够了
     stream: BufWriter<TcpStream>,
 
-    // The buffer for reading frames.
+    // 用于读取帧的缓冲区
     buffer: BytesMut,
 }
 
 impl Connection {
-    /// Create a new `Connection`, backed by `socket`. Read and write buffers
-    /// are initialized.
+    /// 创建一个新的 `Connection`，由 `socket` 支持。读取和写入缓冲区被初始化
     pub fn new(socket: TcpStream) -> Connection {
         Connection {
             stream: BufWriter::new(socket),
@@ -42,17 +38,15 @@ impl Connection {
         }
     }
 
-    /// Read a single `Frame` value from the underlying stream.
+    /// 从底层流中读取单个 `Frame` 值
     ///
-    /// The function waits until it has retrieved enough data to parse a frame.
-    /// Any data remaining in the read buffer after the frame has been parsed is
-    /// kept there for the next call to `read_frame`.
+    /// 该函数会等待直到它检索到足够的数据来解析帧。帧被解析后留在读取缓冲区中的
+    /// 任何数据都会保留，供下一次调用 `read_frame` 使用
     ///
-    /// # Returns
+    /// # 返回值
     ///
-    /// On success, the received frame is returned. If the `TcpStream`
-    /// is closed in a way that doesn't break a frame in half, it returns
-    /// `None`. Otherwise, an error is returned.
+    /// 成功时返回接收到的帧。如果 `TcpStream` 以不会将帧截断的方式关闭，
+    /// 则返回 `None`。否则返回错误
     pub async fn read_frame(&mut self) -> crate::Result<Option<Frame>> {
         loop {
             // Attempt to parse a frame from the buffered data. If enough data
@@ -80,10 +74,9 @@ impl Connection {
         }
     }
 
-    /// Tries to parse a frame from the buffer. If the buffer contains enough
-    /// data, the frame is returned and the data removed from the buffer. If not
-    /// enough data has been buffered yet, `Ok(None)` is returned. If the
-    /// buffered data does not represent a valid frame, `Err` is returned.
+    /// 尝试从缓冲区解析帧。如果缓冲区包含足够的数据，则返回帧并从缓冲区中删除数据。
+    /// 如果缓冲的数据还不够，则返回 `Ok(None)`。如果缓冲的数据不表示有效的帧，
+    /// 则返回 `Err`
     fn parse_frame(&mut self) -> crate::Result<Option<Frame>> {
         use frame::Error::Incomplete;
 
@@ -145,14 +138,12 @@ impl Connection {
         }
     }
 
-    /// Write a single `Frame` value to the underlying stream.
+    /// 将单个 `Frame` 值写入底层流
     ///
-    /// The `Frame` value is written to the socket using the various `write_*`
-    /// functions provided by `AsyncWrite`. Calling these functions directly on
-    /// a `TcpStream` is **not** advised, as this will result in a large number of
-    /// syscalls. However, it is fine to call these functions on a *buffered*
-    /// write stream. The data will be written to the buffer. Once the buffer is
-    /// full, it is flushed to the underlying socket.
+    /// `Frame` 值使用 `AsyncWrite` 提供的各种 `write_*` 函数写入套接字
+    /// 直接在 `TcpStream` 上调用这些函数**不**建议，因为这会导致大量的系统调用
+    /// 但是，在*缓冲*写流上调用这些函数是可以的。数据会被写入缓冲区。一旦缓冲区
+    /// 满了，它就会被刷新到底层套接字
     pub async fn write_frame(&mut self, frame: &Frame) -> io::Result<()> {
         // Arrays are encoded by encoding each entry. All other frame types are
         // considered literals. For now, mini-redis is not able to encode
@@ -180,7 +171,7 @@ impl Connection {
         self.stream.flush().await
     }
 
-    /// Write a frame literal to the stream
+    /// 将帧字面量写入流
     async fn write_value(&mut self, frame: &Frame) -> io::Result<()> {
         match frame {
             Frame::Simple(val) => {
@@ -218,7 +209,7 @@ impl Connection {
         Ok(())
     }
 
-    /// Write a decimal frame to the stream
+    /// 将十进制帧写入流
     async fn write_decimal(&mut self, val: u64) -> io::Result<()> {
         use std::io::Write;
 

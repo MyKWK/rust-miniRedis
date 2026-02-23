@@ -1,17 +1,17 @@
-//! Subscribe to a redis channel example.
+//! 订阅 Redis 通道示例
 //!
-//! A simple client that connects to a mini-redis server, subscribes to "foo" and "bar" channels
-//! and awaits messages published on those channels
+//! 一个简单的客户端，连接到 mini-redis 服务器，订阅 "foo" 和 "bar" 通道，
+//! 并等待在这些通道上发布的消息
 //!
-//! You can test this out by running:
+//! 你可以通过运行以下命令来测试：
 //!
 //!     cargo run --bin mini-redis-server
 //!
-//! Then in another terminal run:
+//! 然后在另一个终端中运行：
 //!
 //!     cargo run --example sub
 //!
-//! And then in another terminal run:
+//! 再在另一个终端中运行：
 //!
 //!     cargo run --example pub
 
@@ -21,13 +21,13 @@ use mini_redis::{clients::Client, Result};
 
 #[tokio::main]
 pub async fn main() -> Result<()> {
-    // Open a connection to the mini-redis address.
+    // 打开到 mini-redis 地址的连接
     let client = Client::connect("127.0.0.1:6379").await?;
 
-    // subscribe to channel foo
+    // 订阅通道 foo
     let mut subscriber = client.subscribe(vec!["foo".into()]).await?;
 
-    // await messages on channel foo
+    // 等待通道 foo 上的消息
     if let Some(msg) = subscriber.next_message().await? {
         println!(
             "got message from the channel: {}; message = {:?}",

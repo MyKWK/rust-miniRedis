@@ -1,5 +1,4 @@
-//! Provides a type representing a Redis protocol frame as well as utilities for
-//! parsing frames from a byte array.
+//! 提供表示 Redis 协议帧的类型以及从字节数组解析帧的工具
 
 use bytes::{Buf, Bytes};
 use std::convert::TryInto;
@@ -8,7 +7,7 @@ use std::io::Cursor;
 use std::num::TryFromIntError;
 use std::string::FromUtf8Error;
 
-/// A frame in the Redis protocol.
+/// Redis 协议中的帧
 #[derive(Clone, Debug)]
 pub enum Frame {
     Simple(String),
@@ -21,24 +20,24 @@ pub enum Frame {
 
 #[derive(Debug)]
 pub enum Error {
-    /// Not enough data is available to parse a message
+    /// 可用数据不足以解析消息
     Incomplete,
 
-    /// Invalid message encoding
+    /// 无效的消息编码
     Other(crate::Error),
 }
 
 impl Frame {
-    /// Returns an empty array
+    /// 返回一个空数组
     pub(crate) fn array() -> Frame {
         Frame::Array(vec![])
     }
 
-    /// Push a "bulk" frame into the array. `self` must be an Array frame.
+    /// 将"bulk"帧推入数组。`self` 必须是数组帧
     ///
-    /// # Panics
+    /// # Panic
     ///
-    /// panics if `self` is not an array
+    /// 如果 `self` 不是数组帧则 panic
     pub(crate) fn push_bulk(&mut self, bytes: Bytes) {
         match self {
             Frame::Array(vec) => {
@@ -48,12 +47,12 @@ impl Frame {
         }
     }
 
-    /// Push an "integer" frame into the array. `self` must be an Array frame.
+    /// 将"integer"帧推入数组。`self` 必须是数组帧
     ///
-    /// # Panics
+    /// # Panic
     ///
-    /// panics if `self` is not an array
-    pub(crate) fn push_int(&mut self, value: u64) {
+    /// 如果 `self` 不是数组帧则 panic
+    pub(crate) fn push_integer(&mut self, value: u64) {
         match self {
             Frame::Array(vec) => {
                 vec.push(Frame::Integer(value));
@@ -62,7 +61,7 @@ impl Frame {
         }
     }
 
-    /// Checks if an entire message can be decoded from `src`
+    /// 检查是否可以从 `src` 解析出完整的消息
     pub fn check(src: &mut Cursor<&[u8]>) -> Result<(), Error> {
         match get_u8(src)? {
             b'+' => {
@@ -102,7 +101,7 @@ impl Frame {
         }
     }
 
-    /// The message has already been validated with `check`.
+    /// 消息已经用 `check` 验证过
     pub fn parse(src: &mut Cursor<&[u8]>) -> Result<Frame, Error> {
         match get_u8(src)? {
             b'+' => {
@@ -167,7 +166,7 @@ impl Frame {
         }
     }
 
-    /// Converts the frame to an "unexpected frame" error
+    /// 将帧转换为"意外帧"错误
     pub(crate) fn to_error(&self) -> crate::Error {
         format!("unexpected frame: {}", self).into()
     }
@@ -237,7 +236,7 @@ fn skip(src: &mut Cursor<&[u8]>, n: usize) -> Result<(), Error> {
     Ok(())
 }
 
-/// Read a new-line terminated decimal
+/// 读取以换行符结尾的十进制数
 fn get_decimal(src: &mut Cursor<&[u8]>) -> Result<u64, Error> {
     use atoi::atoi;
 
@@ -246,7 +245,7 @@ fn get_decimal(src: &mut Cursor<&[u8]>) -> Result<u64, Error> {
     atoi::<u64>(line).ok_or_else(|| "protocol error; invalid frame format".into())
 }
 
-/// Find a line
+/// 查找一行
 fn get_line<'a>(src: &mut Cursor<&'a [u8]>) -> Result<&'a [u8], Error> {
     // Scan the bytes directly
     let start = src.position() as usize;

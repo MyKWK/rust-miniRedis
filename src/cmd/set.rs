@@ -120,10 +120,9 @@ impl Set {
         Ok(Set { key, value, expire })
     }
 
-    /// Apply the `Set` command to the specified `Db` instance.
+    /// 将 `Set` 命令应用到指定的 `Db` 实例
     ///
-    /// The response is written to `dst`. This is called by the server in order
-    /// to execute a received command.
+    /// 响应被写入 `dst`。这是由服务器调用以执行接收到的命令
     #[instrument(skip(self, db, dst))]
     pub(crate) async fn apply(self, db: &Db, dst: &mut Connection) -> crate::Result<()> {
         // Set the value in the shared database state.
