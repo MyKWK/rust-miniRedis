@@ -30,10 +30,9 @@ impl Connection {
     pub fn new(socket: TcpStream) -> Connection {
         Connection {
             stream: BufWriter::new(socket),
-            // Default to a 4KB read buffer. For the use case of mini redis,
-            // this is fine. However, real applications will want to tune this
-            // value to their specific use case. There is a high likelihood that
-            // a larger read buffer will work better.
+            // 默认使用 4KB 的读取缓冲区。对于 mini redis 的使用场景来说，
+            // 这个大小是合适的。但是，实际应用会希望根据其特定使用场景调整此值。
+            // 很有可能更大的读取缓冲区会工作得更好。
             buffer: BytesMut::with_capacity(4 * 1024),
         }
     }
@@ -49,22 +48,19 @@ impl Connection {
     /// 则返回 `None`。否则返回错误
     pub async fn read_frame(&mut self) -> crate::Result<Option<Frame>> {
         loop {
-            // Attempt to parse a frame from the buffered data. If enough data
-            // has been buffered, the frame is returned.
+            // 尝试从缓冲数据中解析帧。如果已经缓冲了足够的数据，
+            // 则返回帧。
             if let Some(frame) = self.parse_frame()? {
                 return Ok(Some(frame));
             }
 
-            // There is not enough buffered data to read a frame. Attempt to
-            // read more data from the socket.
+            // 缓冲的数据不足以读取帧。尝试从套接字读取更多数据。
             //
-            // On success, the number of bytes is returned. `0` indicates "end
-            // of stream".
+            // 成功时，返回读取的字节数。`0` 表示"流结束"。
             if 0 == self.stream.read_buf(&mut self.buffer).await? {
-                // The remote closed the connection. For this to be a clean
-                // shutdown, there should be no data in the read buffer. If
-                // there is, this means that the peer closed the socket while
-                // sending a frame.
+                // 远程对等方关闭了连接。要成为干净的关闭，
+                // 读取缓冲区中应该没有数据。如果有，这意味着对等方在发送帧时
+                // 关闭了套接字。
                 if self.buffer.is_empty() {
                     return Ok(None);
                 } else {
@@ -80,60 +76,45 @@ impl Connection {
     fn parse_frame(&mut self) -> crate::Result<Option<Frame>> {
         use frame::Error::Incomplete;
 
-        // Cursor is used to track the "current" location in the
-        // buffer. Cursor also implements `Buf` from the `bytes` crate
-        // which provides a number of helpful utilities for working
-        // with bytes.
+        // Cursor 用于跟踪缓冲区中的"当前"位置。Cursor 也实现了 `bytes` crate
+        // 的 `Buf` trait，它提供了许多处理字节的有用工具。
         let mut buf = Cursor::new(&self.buffer[..]);
 
-        // The first step is to check if enough data has been buffered to parse
-        // a single frame. This step is usually much faster than doing a full
-        // parse of the frame, and allows us to skip allocating data structures
-        // to hold the frame data unless we know the full frame has been
-        // received.
+        // 第一步是检查是否已经缓冲了足够的数据来解析单个帧。这一步通常比
+        // 完整解析帧快得多，并且允许我们跳过分配数据结构来保存帧数据，
+        // 除非我们知道已经收到了完整的帧。
         match Frame::check(&mut buf) {
             Ok(_) => {
-                // The `check` function will have advanced the cursor until the
-                // end of the frame. Since the cursor had position set to zero
-                // before `Frame::check` was called, we obtain the length of the
-                // frame by checking the cursor position.
+                // `check` 函数会将游标前进到帧的末尾。由于在调用 `Frame::check` 之前
+                // 游标的位置被设置为零，我们可以通过检查游标位置来获取帧的长度。
                 let len = buf.position() as usize;
 
-                // Reset the position to zero before passing the cursor to
-                // `Frame::parse`.
+                // 在将游标传递给 `Frame::parse` 之前，将位置重置为零。
                 buf.set_position(0);
 
-                // Parse the frame from the buffer. This allocates the necessary
-                // structures to represent the frame and returns the frame
-                // value.
+                // 从缓冲区解析帧。这会分配必要的结构来表示帧并返回帧值。
                 //
-                // If the encoded frame representation is invalid, an error is
-                // returned. This should terminate the **current** connection
-                // but should not impact any other connected client.
+                // 如果编码的帧表示无效，则返回错误。这应该终止**当前**连接，
+                // 但不应影响任何其他已连接的客户端。
                 let frame = Frame::parse(&mut buf)?;
 
-                // Discard the parsed data from the read buffer.
+                // 从读取缓冲区中丢弃已解析的数据。
                 //
-                // When `advance` is called on the read buffer, all of the data
-                // up to `len` is discarded. The details of how this works is
-                // left to `BytesMut`. This is often done by moving an internal
-                // cursor, but it may be done by reallocating and copying data.
+                // 当在读取缓冲区上调用 `advance` 时，直到 `len` 的所有数据都会被丢弃。
+                // 具体如何工作的细节留给 `BytesMut`。这通常通过移动内部游标来完成，
+                // 但也可能通过重新分配和复制数据来完成。
                 self.buffer.advance(len);
 
-                // Return the parsed frame to the caller.
+                // 将解析的帧返回给调用者。
                 Ok(Some(frame))
             }
-            // There is not enough data present in the read buffer to parse a
-            // single frame. We must wait for more data to be received from the
-            // socket. Reading from the socket will be done in the statement
-            // after this `match`.
+            // 读取缓冲区中没有足够的数据来解析单个帧。我们必须等待从套接字
+            // 接收更多数据。从套接字读取将在这个 `match` 之后的语句中完成。
             //
-            // We do not want to return `Err` from here as this "error" is an
-            // expected runtime condition.
+            // 我们不想从这里返回 `Err`，因为这种"错误"是预期的运行时条件。
             Err(Incomplete) => Ok(None),
-            // An error was encountered while parsing the frame. The connection
-            // is now in an invalid state. Returning `Err` from here will result
-            // in the connection being closed.
+            // 解析帧时遇到错误。连接现在处于无效状态。从这里返回 `Err` 
+            // 将导致连接被关闭。
             Err(e) => Err(e.into()),
         }
     }
@@ -145,29 +126,27 @@ impl Connection {
     /// 但是，在*缓冲*写流上调用这些函数是可以的。数据会被写入缓冲区。一旦缓冲区
     /// 满了，它就会被刷新到底层套接字
     pub async fn write_frame(&mut self, frame: &Frame) -> io::Result<()> {
-        // Arrays are encoded by encoding each entry. All other frame types are
-        // considered literals. For now, mini-redis is not able to encode
-        // recursive frame structures. See below for more details.
+        // 数组通过编码每个条目来编码。所有其他帧类型被视为字面量。
+        // 目前，mini-redis 无法编码递归帧结构。详见下文。
         match frame {
             Frame::Array(val) => {
-                // Encode the frame type prefix. For an array, it is `*`.
+                // 编码帧类型前缀。对于数组，它是 `*`。
                 self.stream.write_u8(b'*').await?;
 
-                // Encode the length of the array.
+                // 编码数组的长度。
                 self.write_decimal(val.len() as u64).await?;
 
-                // Iterate and encode each entry in the array.
+                // 迭代并编码数组中的每个条目。
                 for entry in &**val {
                     self.write_value(entry).await?;
                 }
             }
-            // The frame type is a literal. Encode the value directly.
+            // 帧类型是字面量。直接编码值。
             _ => self.write_value(frame).await?,
         }
 
-        // Ensure the encoded frame is written to the socket. The calls above
-        // are to the buffered stream and writes. Calling `flush` writes the
-        // remaining contents of the buffer to the socket.
+        // 确保编码的帧被写入套接字。上面的调用是针对缓冲流和写入。
+        // 调用 `flush` 会将缓冲区的剩余内容写入套接字。
         self.stream.flush().await
     }
 
@@ -199,10 +178,9 @@ impl Connection {
                 self.stream.write_all(val).await?;
                 self.stream.write_all(b"\r\n").await?;
             }
-            // Encoding an `Array` from within a value cannot be done using a
-            // recursive strategy. In general, async fns do not support
-            // recursion. Mini-redis has not needed to encode nested arrays yet,
-            // so for now it is skipped.
+            // 从值内部编码 `Array` 无法使用递归策略完成。
+            // 通常，异步函数不支持递归。Mini-redis 还不需要编码嵌套数组，
+            // 所以目前暂时跳过。
             Frame::Array(_val) => unreachable!(),
         }
 
@@ -213,7 +191,7 @@ impl Connection {
     async fn write_decimal(&mut self, val: u64) -> io::Result<()> {
         use std::io::Write;
 
-        // Convert the value to a string
+        // 将值转换为字符串
         let mut buf = [0u8; 20];
         let mut buf = Cursor::new(&mut buf[..]);
         write!(&mut buf, "{}", val)?;
